@@ -46,7 +46,7 @@ cpgs_proc <- function(input_cpgs) {
   
   cat(sprintf("Cpg bases positions for cells 100310:100386 were generated\n"))
   
-  return(input_cpgs)
+  
   
 }
 
