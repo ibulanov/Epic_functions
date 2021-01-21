@@ -26,7 +26,7 @@ cpgs_proc <- function(input_cpgs) {
                         inner join cpgBases B on ((C.pos = B.pos) AND (C.chrom = B.chrom))
                         where C.expID between 100310 and 100386") %>% fetch(n=-1) 
   
-  input_cpgs <- setDT(input_cpgs) %>% .[, compl_pos := ifelse(strand == 1, pos+1, pos-1)]
+  input_cpgs <- setDT(input_cpgs) %>% .[, compl_pos := ifelse(strand == 1, pos+1, pos)]
   
   #create the complementary df
   cpgs_compl <- data.table(input_cpgs$expID, input_cpgs$chrom, input_cpgs$compl_pos)

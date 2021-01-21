@@ -3,6 +3,7 @@ library(tidyverse)
 library(data.table)
 library(Melissa)
 library(BPRMeth)
+library(dplyr)
 
 dt_obj <- melissa_encode_dt
 
@@ -92,7 +93,7 @@ prom_db_proc <- function(prom_length) {
   output_db <- dbSendQuery(mouse_public, "select chrom, strand, txStart, txEnd
                          from knownGene") %>% fetch(n=-1) %>% setDT() %>% 
     .[, feature_start := ifelse(strand == "+", txStart - prom_length, txEnd)] %>%
-    .[, feature_end := ifelse(strand == "+", txStart -1, txEnd + prom_length - 1)] %>%
+    .[, feature_end := ifelse(strand == "+", txStart, txEnd + prom_length)] %>%
     .[, c("strand", "txStart", "txEnd") := NULL] %>% distinct()
   
   unique_features_number <- nrow(output_db)
@@ -182,7 +183,7 @@ binarise_files(indir = "/home/igor/Data/zuse1db/melissa/input_cells_unmet/",
 
 input_melissa <- create_melissa_data_obj(
   met_dir = "/home/igor/Data/zuse1db/melissa/input_cells_3_1/",
-  anno_file = "/home/igor/Data/zuse1db/melissa/anno_files/anno_win_1k.tsv",
+  anno_file = "/home/igor/Data/zuse1db/melissa/anno_files/anno_prom_1k_37k.tsv",
   chrom_size_file = NULL,
   chr_discarded = NULL,
   is_centre = TRUE,
@@ -204,14 +205,14 @@ basis_mean <- create_rbf_object(M = 0)
 #partitioning the dataset
 set.seed(15)
 # Partition to training and test set
-input_melissa_prom_1k_37_part <- partition_dataset(dt_obj = input_melissa_prom_1k_37, data_train_prcg = 0.2,
+input_melissa_part <- partition_dataset(dt_obj = input_melissa, data_train_prcg = 0.2,
                                 region_train_prcg = 1, cpg_train_prcg = 0.4, 
                                 is_synth = FALSE)
 
 #RUN MELISSA
 set.seed(15)
 # Run Melissa with K = 4 clusters
-melissa_out_prom1k_3_1 <- melissa(X = input_melissa_prom_1k_3_1$met, K = 2, basis = basis_obj,
+melissa_obj_maxfilt <- melissa(X = input_melissa_maxfilt$met, K = 2, basis = basis_obj,
                        vb_max_iter = 500, vb_init_nstart = 10, 
                        is_parallel = TRUE, no_cores = 5)
 
@@ -221,10 +222,14 @@ melissa_obj$pi_k
 melissa_obj <- eval_cluster_performance(melissa_obj, melissa_obj$r_nk)
 
 #plot
-plot_melissa_profiles(melissa_obj = melissa_out_prom1k_3_1, region = 5000, 
-                      title = "Methylation profiles for region 10")
+plot_melissa_profiles(melissa_obj = melissa_obj, region = 13991, 
+                      title = "Methylation profiles for region")
 
-#run BPRMeth package for each separate cell but for all region
+# run melissa imputation
+melissa_imputation <- impute_met_files(met_dir = "/home/igor/Data/zuse1db/melissa/input_cells_3_1", obj = melissa_obj,
+                        anno_region = input_melissa$anno_region)
+
+####run BPRMeth package for each separate cell but for all region####
 
 list_of_input_objs <- list()
 
@@ -234,30 +239,23 @@ for (i in seq_along(input_melissa$met)) {
   list_of_input_objs[[i]] <- cur_cell
 }
 
-
-cluster_profiles_cells_f_13k_base0 <- list()
-for (i in seq_along(list_of_input_objs)) {
-  cur_cluster_13k <- cluster_profiles_vb(X = cell_13k$met, K = 2, model = "bernoulli",
-                                alpha_0 = .5, beta_0 = .1,
-                                basis = basis_mean, 
-                                vb_max_iter = 500, 
-                                is_verbose = TRUE
-                                )
-  cluster_profiles_cells_f_13k_base0[[i]] <- cur_cluster_13k
-  print(i)
-}
-
 #delete extra na 
 for (i in seq_along(list_of_input_objs)) {
   list_of_input_objs[[i]]$met <- list_of_input_objs[[i]]$met[!is.na(list_of_input_objs[[i]]$met)]
 }
 
-cl_13k_13k <- cluster_profiles_vb(X = cell_13k$met, K = 2, model = "bernoulli",
-                                   alpha_0 = .5, beta_0 = .1,
-                                   basis = basis_obj, 
-                                   vb_max_iter = 500, 
-                                   is_verbose = TRUE
-)
+infer_profiles_cells_base4_mle <- list()
+for (i in seq_along(list_of_input_objs)) {
+  cur_cluster_13k <- infer_profiles_mle(X = list_of_input_objs[[i]]$met, model = "bernoulli",
+                                basis = basis_obj, 
+                                vb_max_iter = 500,
+                                is_parallel = TRUE,
+                                no_cores = 6,
+                                is_verbose = TRUE
+                                )
+  infer_profiles_cells_base4_mle[[i]] <- cur_cluster_13k
+  print(i)
+}
 
 #assign 13k annotations region to flexible numbers of met values
 for (i in seq_along(list_of_input_objs)) {
@@ -279,40 +277,59 @@ fit_profiles <- infer_profiles_vb(X = cell_13k$met, model = "binomial",
                                   basis = basis_obj, is_parallel = TRUE)
 
 #for 77 cells
-infer_profiles_bases_0 <- list()
+infer_profiles_bases_1 <- list()
 for (i in seq_along(list_of_input_objs)) {
   cur_profile <- infer_profiles_vb(X = list_of_input_objs[[i]]$met, model = "bernoulli",
                                          alpha_0 = .5, beta_0 = .1,
-                                         basis = basis_mean, 
+                                         basis = basis_obj, 
                                          vb_max_iter = 500,
                                          is_parallel = TRUE,
-                                         no_cores = 5,
+                                         no_cores = 6,
                                          is_verbose = TRUE
   )
-  infer_profiles_bases_0[[i]] <- cur_profile
+  infer_profiles_bases_1[[i]] <- cur_profile
   print(i)
 }
 
-#detect min length
+# Perform clustering for individual profile
+cl_obj <- cluster_profiles_vb(X = bernoulli_data, K = 3, model = "bernoulli", 
+                              basis = basis_obj, vb_max_iter = 40)
 
+cluster_plot <- plot_cluster_profiles(cluster_obj = cl_obj)
+
+#detect min length
 ll <- c()
-for (i in seq_along(infer_profiles_bases_0)) {
-  cur_length <- length(infer_profiles_bases_0[[i]]$W)
+for (i in seq_along(infer_profiles_bases_4)) {
+  cur_length <- length(infer_profiles_bases_4[[i]]$W)
   ll <- append(cur_length, ll) 
 }
 
 #matrix of inferred profiles (cells and genomic regions)
-cell_region_weights <- res_matrix <- matrix(nrow = max(ll), ncol = 77)
+infer_prof_sc_mtx <- matrix(nrow = 13991, ncol = 77)
 
-for (i in seq_along(infer_profiles_bases_0)) {
-  cell_region_weights[,i][c(1:length(infer_profiles_bases_0[[i]]$W))] <- infer_profiles_bases_0[[i]]$W
+for (i in seq_along(infer_profiles_bases_4)) {
+  infer_prof_sc_mtx[,i][c(1:length(infer_profiles_bases_4[[i]]$W))] <- infer_profiles_bases_4[[i]]$W
 }
 
-cell_region_weights_cut <- cell_region_weights[c(1:min(ll)), c(1:77)]
-colnames(cell_region_weights_cut) <- seq(100310, 100386)
+infer_prof_sc_mtx_cut <- infer_prof_sc_mtx[c(1:min(ll)), c(1:77)]
+colnames(infer_prof_sc_mtx_cut) <- seq(100310, 100386)
 
 #PCA by factoMineR
 library(FactoMineR)
-res.pca = PCA(t(cell_region_weights_cut), scale.unit=FALSE, ncp=5, graph=T)
+res.pca = PCA(t(infer_prof_sc_mtx_cut), scale.unit=TRUE, ncp=5, graph=T)
+
+#UMAP
+library(umap)
+result_umap <- umap(t(vb_profiles_matrix), config = umap.defaults, method = "umap-learn")
+plot(result_umap$layout)
+
+
+#Imputation of individual cpg sites
+impute_met_dir <- "/home/igor/Data/zuse1db/melissa/input_cells_3_1"
+
+imputation_out <- impute_met_files(met_dir = impute_met_dir, obj = melissa_output,
+                                   anno_region = input_melissa$anno_region)
+
+
 
 
