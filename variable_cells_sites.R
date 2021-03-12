@@ -3,9 +3,9 @@ library(tibble)
 library(dplyr)
 library(data.table)
 
-best_dir <- "/home/igor/Data/Epiclomal_results/17_01_200_mm10_sci-MET_scNMT_clustering/5_0.95_10000/epi_region/8/"
-input_dir <- "/home/igor/Data/Epiclomal_results/16_01_200_sci-MET_scNMT_mm10_preproc/epiclomal_input/5_0.95_10000/"
-output_dir <- "/home/igor/Data/Epiclomal_results/17_01_200_mm10_sci-MET_scNMT_clustering/5_0.95_10000/visual/"
+best_dir <- "/home/igor/Data/Epiclomal_results/18_02_32_SW_mm10_CGI_clust/0_0.95_10000/epi_region/462/"
+input_dir <- "/home/igor/Data/Epiclomal_results/18_02_32_sw_mm10_CGI_preproc/epiclomal_input/0_0.95_10000/"
+out_dir <- "/home/igor/Data/Epiclomal_results/18_02_32_SW_mm10_CGI_clust/0_0.95_10000/custom_visual/"
 
 cluster_map <- fread(paste0(best_dir, "cluster_MAP.tsv.gz"), header = TRUE) %>%
   .[,c(1,2)] 
@@ -13,7 +13,7 @@ colnames(cluster_map) <- c("cell_id", "cluster")
 cluster_map$cluster <- cluster_map$cluster + 1
 
 setwd(input_dir)
-input_epiclomal <- fread(paste0(input_dir, "input_Epiclomal_top200_mm10.tsv.gz")) %>%
+input_epiclomal <- fread(paste0(input_dir, sprintf("input_Epiclomal_32_Sw.tsv.gz"))) %>%
   column_to_rownames(., "cell_id") %>%
   t()
 
@@ -59,8 +59,8 @@ for (f in seq_along(cell_ids[[1]])) {
 ##create cl center and cells for each cluster
 #1
 cl_cells <- list()
-for (c in seq_along(cell_ids_cl)) {
-  cl_cells[[c]] <- cbind(region_map[,c],result_comb[,cell_ids_cl[[c]]])
+for (c in seq_along(cell_ids)) {
+  cl_cells[[c]] <- cbind(region_map[,c],result_comb[,cell_ids[[c]]])
 }
 #2
 table_diff <- list()
@@ -72,10 +72,15 @@ for (f in c(1:9)) {
   for (r in seq_along(cell_ids[[f]])) {
     tmp <- cl_cells[[f]][,c(1,r+1)] %>% as.data.frame()
     tmp$diff <- ifelse(tmp[,1] == tmp[,2], NA, tmp[,2])
-    table_diff[[f]]$diff_0[r] = table(tmp$diff)[["0"]]
-    table_diff[[f]]$diff_1[r] = table(tmp$diff)[["1"]]  
+    table_diff[[f]]$diff_0[r] = table(factor(tmp$diff, levels = 0:1))[[1]]
+    table_diff[[f]]$diff_1[r] = table(factor(tmp$diff, levels = 0:1))[[2]]
   }
 }
+
+#count total dist 0 and 1
+table_diff_total <- rbind(table_diff[[1]], table_diff[[2]], table_diff[[3]], table_diff[[4]], 
+                          table_diff[[5]], table_diff[[6]], table_diff[[7]], table_diff[[8]], 
+                          table_diff[[9]])
 
 #the process for finding most variable cpg across cells (?)
 cpgs_cells <- list()
@@ -86,13 +91,11 @@ names(cpgs_cells) <- colnames(region_map)
 
 
 comp_tbl <- list()
-comp_tbl[[1]] <- matrix(nrow = (ncol(cpgs_cells[[1]]) ** 2), ncol = 4)
-comp_tbl[[2]] <- matrix(nrow = (ncol(cpgs_cells[[2]]) ** 2), ncol = 4)
-comp_tbl[[3]] <- matrix(nrow = (ncol(cpgs_cells[[3]]) ** 2), ncol = 4)
-comp_tbl[[4]] <- matrix(nrow = (ncol(cpgs_cells[[4]]) ** 2), ncol = 4)
-comp_tbl[[5]] <- matrix(nrow = (ncol(cpgs_cells[[5]]) ** 2), ncol = 4)
+for (t in c(1:ncol(region_map))) {
+  comp_tbl[[t]] <- matrix(nrow = (ncol(cpgs_cells[[t]]) ** 2), ncol = 4)
+}
 
-for (r in c(1:5)) {
+for (r in c(1:7,9)) {
   r_count <-  1
   for (c in c(1:ncol(cpgs_cells[[r]]))) {
     for (l in c(1:ncol(cpgs_cells[[r]]))) {
@@ -106,20 +109,29 @@ for (r in c(1:5)) {
     print(c)
   }
   comp_tbl[[r]] <- as.data.table(comp_tbl[[r]])
+  comp_tbl[[r]]$V4 <- as.numeric(comp_tbl[[r]]$V4)
   setkey(comp_tbl[[r]], V4)
+  
 }
 
 #for 5 cl separately
 #to see count of diff cpgs between two cells
-table(comp_tbl[[1]]$V4)
+table(comp_tbl[[5]]$V4)
 
-most_diff <- subset(comp_tbl[[1]], (V4 %in% c(11:17)))
+most_diff <- subset(comp_tbl[[5]], (V4 %in% c(253:273)))
 
 sort(table(most_diff$V1))
 
-#cl_N_ids = c()
+cl_5_ids = c("E4.5-5.5_new_Plate2_A10", "E7.5_Plate4_H4", "E6.75_Plate2_G10", "E4.5-5.5_new_Plate2_D10","E4.5-5.5_new_Plate2_A06")
 
-most_diff <- subset(most_diff, (V1 %in% cl_5_ids)) %>% 
-  subset(., (V2 %in% cl_5_ids))
+most_diff <- subset(most_diff, (V1 %in% cl_1_ids)) %>% 
+  subset(., (V2 %in% cl_1_ids))
 
 unique(most_diff$V3) %>% paste(., collapse = ',') %>% strsplit(., ",") %>% .[[1]] %>% as.numeric(.) %>% table(.)
+
+#to take regions
+result_comb_top1 <- result_comb[,cl_1_ids]
+result_comb_top1 <- cbind(region_map[,1], result_comb_top1)
+rownames(result_comb_top1) <- rownames(result_comb)
+
+

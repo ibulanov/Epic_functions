@@ -11,8 +11,8 @@ library(stringr)
 setwd("/home/igor/Data/Mulqueen2018_mm10_100")
 mm_cells <- list.files(".")
 
-cell_ids = strsplit(mm_cells, "_", fixed = TRUE) %>% unlist() %>% matrix(nrow = 100, byrow = TRUE) %>% as.data.frame()
-cell_ids = paste0(cell_ids$V3, "_", cell_ids$V4)
+cell_ids = strsplit(mm_cells, "_", fixed = TRUE) %>% unlist() %>% matrix(nrow = 26, byrow = TRUE) %>% as.data.frame()
+cell_ids = paste0(cell_ids$V2, "_", cell_ids$V3)
 
 dirs = list.dirs("/home/igor/Data/Mulqueen2018_mm10_100")[2:101]
 
@@ -30,7 +30,7 @@ for (d in seq_along(dirs)) {
   print(d)
 }
 
-#restructure data mouse cortex data - old conde for wrong code above deleted already.
+#restructure data mouse cortex data - old code for wrong code above was deleted already.
 setwd("/home/igor/Data/sci-MET_mous_cortex_scNMT")
 for (f in c(1:26)) {
   tmp <- fread(all_files[f], sep=',')
@@ -46,6 +46,7 @@ for (f in c(1:114)) {
   fwrite(tmp, mm_cells[f], sep='\t')
   print(f)
 }
+
   
 #for scNMT data
 setwd("/home/igor/Data/scnmt_gastrulation/met/epi_100_high")
@@ -90,6 +91,8 @@ for (f in seq_along(hg_cells)) {
   fwrite(tmp, sprintf("/home/igor/Data/Zhu_Guo2017_100/smallest_50/proc_for_epi/%s_cov.tsv.gz", cell_ids[f]), sep='\t')
   print(f)
 }
+
+
 
 #true for 320 KC and Zhu
 cells_350 <- list.files("/home/igor/Data/mysql_data/KC_2k/cov_300KC_all_chr_20_Zhu") %>%
@@ -145,15 +148,59 @@ fwrite(result_comb, paste0(output_dir, "epiclomal_comb_5_95_10k_200_mm10.tsv"),
 #M3C umap
 library(M3C)
 M3C::umap(result_comb,
-          labels=as.factor(cluster_map$cluster),
+          labels=as.factor(c(cluster_map$cluster, rep(max(cluster_map$cluster)+1, max(cluster_map$cluster)))),
           dotsize = 2,
           axistextsize = 10,
           legendtextsize = 15
           )
 
+#new scimet processing  hg19
+library(data.table)
+library(dplyr)
+tmp <- fread("/home/igor/Data/Mulqueen2018/hg19/GSE112554_HumanCellLineSplit_Barcoded_CG.bed.gz")
 
+setkey(tmp, BARCODE, CHR, START, Tn5_Tracked_Condition)
+hg19_list <- split(tmp, tmp$BARCODE)
+mdata <- data.table(barcode = tmp$BARCODE, lib_prep_cond = tmp$Library_Preparation_Condition, tn5_cond = tmp$Tn5_Tracked_Condition)
+mdata <- distinct(mdata)
 
+#for Epiclomal
+setwd("/home/igor/Data/Mulqueen2018/hg19/for_Epiclomal")
+for (f in seq_along(hg19_list)) {
+  tmp <- hg19_list[[f]]
+  tmp$PERC_MET <- tmp$PERC_MET / 100
+  tmp$PERC_MET <- ifelse(tmp$PERC_MET >= 0.5, 1, 0)
+  tmp$total_reads <- tmp$C_MET_COUNT + tmp$C_UNMET_COUNT
+  tmp$END <- tmp$END + 1
+  tmp <- tmp[,c(1,2,3,4,5,10)]  
+  colnames(tmp) <- c("chr", "CpG_start", "CpG_end", "meth_frac",	"count_meth", "total_reads")
+  fwrite(tmp, sprintf("%s_cov.tsv.gz",names(hg19_list)[f]), sep='\t')
+  print(f)
+}
 
+mdata <- fread("/home/igor/Data/Mulqueen2018/hg19/sci-MET_hg19_metadata.tsv")
+test_mdata <- subset(mdata, !(tn5_cond %in% c('Mix_1', 'Mix_2'))) 
+test_true_file <- test_mdata[, c(4,5)]
 
+#Mulqueen mm10
 
+tmp <- fread("/home/igor/Data/Mulqueen2018/mouse/GSE112554_MouseCortex_Barcoded_CG.bed.gz")
 
+setkey(tmp, V6, V1, V2, V7)
+mm10_list <- split(tmp, tmp$V6)
+mdata <- data.table(barcode = tmp$V6, organism = tmp$V7)
+mdata <- distinct(mdata)
+
+#for Epiclomal
+setwd("/home/igor/Data/Mulqueen2018/mm10/285_mm10_sci-MET_Mulqueen_Epiclomal")
+for (f in seq_along(mm10_list)) {
+  tmp <- mm10_list[[f]]
+  tmp$PERC_MET <- tmp$PERC_MET / 100
+  tmp$PERC_MET <- ifelse(tmp$PERC_MET >= 0.5, 1, 0)
+  tmp$total_reads <- tmp$C_MET_COUNT + tmp$C_UNMET_COUNT
+  tmp$END <- tmp$END + 1
+  tmp <- tmp[,c(1,2,3,4,5,10)]  
+  colnames(tmp) <- c("chr", "CpG_start", "CpG_end", "meth_frac",	"count_meth", "total_reads")
+  fwrite(tmp, sprintf("%s_cov.tsv.gz",names(mm10_list)[f]), sep='\t')
+  print(f)
+}
