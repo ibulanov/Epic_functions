@@ -1,0 +1,304 @@
+---
+title: "Epiclomal: A User Manual"
+author: "Igor Bulanov"
+date: "12/03/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = FALSE, echo = TRUE, warning = FALSE, message = FALSE)
+options(tinytex.verbose = TRUE)
+```
+
+# Preface
+
+This unofficial tutorial represents the experience of using Epiclomal software for 
+imputing and clustering sparse single cell Whole-Genome Bisulfite Sequencing
+data. Clickable links are available as [Article](https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1008270)
+and [Github](https://github.com/molonc/Epiclomal).
+
+# Installation
+
+Set up conda with the required packages.
+
+First ensure you have the correct channels:
+
+```{bash}
+conda config --add channels 'https://conda.anaconda.org/dranew'
+conda config --add channels 'https://conda.anaconda.org/aroth85'
+conda config --add channels 'https://conda.anaconda.org/shahcompbio'
+conda config --add channels 'bioconda'
+conda config --add channels 'r'
+conda config --add channels 'conda-forge'
+```
+
+## From Source
+
+Clone Epiclomal:
+
+
+```{bash}
+git clone https://github.com/shahcompbio/Epiclomal.git
+cd Epiclomal
+```
+
+Then create an environment with the required packages:
+
+```{bash}
+conda create --name Epiclomal --file conda_packages.txt
+```
+
+Activate the environment:
+
+```{bash}
+conda activate Epiclomal
+```
+
+Add Epiclomal Python package into the current site packages:
+
+```{bash}
+python setup.py install
+```
+
+Epiclomal R package has a dependency on DensityCut, which must be manually installed before adding Epiclomal R package. Install according to instructions listed here: https://bitbucket.org/jerry00/densitycut_dev/
+
+Epiclomal also has a dependency on the bigstatsr R package, to install, run command
+
+
+```{bash}
+remotes::install_github("privefl/bigstatsr")
+```
+
+in R.
+
+Add Epiclomal R package into current site packages:
+
+```{bash}
+R CMD build REpiclomal
+R CMD INSTALL REpiclomal_1.0.tar.gz
+```
+
+# Usage
+
+## Run entire pipeline with generated synthetic data
+
+Run of Epiclomal for synthetic data described [here](https://github.com/molonc/Epiclomal#run-entire-pipeline-with-generated-synthetic-data).
+
+## Run pipeline with real data
+
+The real data pipeline requires two steps which are separated into two workflows.
+First, the real data must be preprocessed into a methylation and region file
+to be consumed by the clustering software.
+
+
+The first important input file is a coverage file for each cell separately:
+
+```{bash}
+chr	CpG_start	CpG_end	meth_frac	count_meth	total_reads
+chr1	3188107	3188108	1	1	1
+chr1	3462068	3462069	0	0	1
+chr1	3462090	3462091	0	0	1
+chr1	3548425	3548426	1	1	1
+chr1	3602524	3602525	1	1	1
+...
+```
+
+The second one is a regions (annotations) file:
+
+```{bash}
+chr	start	end
+chr1	746801	747200
+chr1	1351001	1351600
+chr1	2381400	2381601
+chr1	2499201	2499800
+chr1	3433200	3433400
+...
+```
+
+And the third one is a true file:
+
+```{bash}
+cell_id	epigenotype_id
+cell_1	1
+cell_2	1
+cell_3	1
+cell_4	2
+cell_5	3
+...
+```
+
+The real data processing workflow requires a config file, an example config file can be found at Epiclomal/snakemake/process_real_data/config.yaml:
+
+```{bash}
+PROCESS_REAL_DATA_DIR: '../../../process_real_data' #directory of the R scripts
+
+DATA_ID: 'arbitrary_name' 
+OUTDIR: '/path/to/output'
+
+COV_DIR: '/path/to/input/data/Smallwood2014/cov' 
+CELL_PATTERN: "_cov.tsv.gz"
+# All the cell names with the pattern will be extracted from COV_DIR
+REGION_FILE: 'data_Smallwood2014/CGI_mm10_regions.txt'
+TRUE_FILE: 'data_Smallwood2014/true_clone_membership.txt.gz'
+
+CPG_COORDS:
+  NAME_REGIONS: 'CGI'
+  GENOME_LIBRARY: 'BSgenome.Mmusculus.UCSC.mm10' #or hg19
+  TYPE_OF_C: 'CpG'
+
+CELL_BASED_METH:
+  INCLUDE_CHRY: 1 # if not, set up as 0
+  DATA_TYPE: 'novoalign' #novoalign by default
+  GENOME: 'mouse' # or human
+
+STATS_METHYLATION:
+    #NUM_CELLS_CUTOFF: 5 - keeping regions with at least this number of cells with
+  #missing proportion < miss_prop_cutoff. If this number is 0, then it uses
+  #the average missing proportion for all cells
+    #MISS_PROP_CUTOFF: 0.95 - missing proportion cutoff to obtain filtered data.
+  #This should be less than the middle value (for example for 0_0.98_0.0,
+  #the missing proportion should be <= 0.98. For sparse datasets, often 0.98
+  #was used. 
+    #NLOCI_CUTOFF: 0.0 - keeping regions with the highest IQR of region-based mean
+  #methylation across cells till number of loci is < nloci_cutoff.
+  #If nloci_cutoff = 0.0 it means this filtering is not applied. Often 10000 was
+  #used. Instead of specifying three filtering parameters separately,
+  #the combination can be used consistently as below:
+  ALL_CUTOFFS: 
+    - "0_0.95_10000" # the first parameter is 0, the second one is 0.95, and so on.
+    - "0_0.95_15000"
+    - "0_0.95_20000"
+    - "0_0.95_50000"
+    - "0_1_0.01"
+    - "0_1_0.05"    
+    - "0_1_0.1"
+    - "0_0.95_0.01"
+    - "0_0.95_0.05"    
+    - "0_0.95_0.1"       
+  FILTER_REGIONS_SAME_METH: 1 # if 1, we will filter out regions with same methylation
+  #across cells
+  PLOT_HEATMAP_FILTERED: 0
+  PLOT_HEATMAP_UNFILTERED: 0
+
+FILTER_REGIONS: 
+  FILTER: False
+  COEF_THRESHOLD: 0.95 # Threshold of Pearson correlation coefficient
+  MEAN_DIFF_THRESHOLD: 0.05 #Threshold of max difference between mean region cluster
+  #methylation
+  N_TO_KEEP: 1000  #the top N most variant regions
+
+READY_EPICLOMAL:
+  FILTER_CPG_NO_DATA: 0 # if 0 = CpGs with no data will be filtered out, if 1 = they are kept
+  LUODIAMOND: 0
+```
+
+After this step in the output folder there are next folders:
+
+```{bash}
+cell_based_CpGs
+cell_based_stats
+CpG_coordinates_in_regions
+epiclomal_input
+filter_regions
+final_stats
+```
+
+Each of them contains the intermediate result, 
+however we are interesting in the **epiclomal_input** folder, which consists
+different statistics for each STATS_METHYLATION combinations (e.g."0_0.95_10000"), 
+and within each combination has two most important files:
+
+1) input_Epiclomal_*.tsv.gz which contains the sparse matrix of either methylated or
+methylated CpG sites for each cell and
+
+2) regionsID_input_Epiclomal_*.tsv.gz which contains the coordinates of regions.
+
+The directories of these two files we have to specify into the clustering config.yaml file:
+
+Note about true clusters file: after preprocessing step is necessary to check
+cells_no_data_*.tsv file and see which cells were cut out.
+If this file is empty, then we can use the same true file as for preprocessing.
+If not, we have to remove these cell ids from the true clusters file.
+
+Then, to run the real data through the clustering software, an example config file can be found at Epiclomal/snakemake/real_data/config.yaml, replace fields with the paths to the newly generated methylation and region files. Include a true clusters file. The real data workflow does 1000 iterations of Epiclomal by default, to change this, edit line 13 of the Snakefile:
+
+```{bash}
+OUTPUT_DIR: '/output'
+
+CUTOFFS: "0_0.95_10000" #one desired filtering combination what was done by preprocessing
+
+INPUT_DIR: 'output/folder/from/previous/step/epiclomal_input' #the last folder should be
+#epiclomal input
+METH_F: 'input_Epiclomal_32_Sw.tsv.gz' # the first output file from previous step
+REGION_F: 'regionIDs_input_Epiclomal_32_Sw.tsv.gz' #the second one
+TRUE_FILE: '/home/igor/Data/Epiclomal_results/true_files/SW_32_mm10_new.txt.gz'
+TRUE_PREVALENCES: 'None' 
+
+NUM_EPI_ITERS: 1000 # number of VB interations
+
+PARAMS:
+  NPM:
+    index: 'ch' # always Calinski-Harabasz (CH) index
+    max_k: 10 # desired number of clusters for non-probabilistic clustering methods
+    impute: 1 # perform an imputing procedure - always 1
+    use_cache: 1 # use cache to upload data - always 1 
+  EPICLOMAL:
+    K: 10 # desired number of clusters for probabilistic clustering
+    slsbulk_iterations: 10 # The number of iterations for the SLSbulk procedure - always 10
+    mu_has_k: True # True or False depending on whether we want mu to depend on k or not
+    convergence_tolerange: 1e-4
+    max_num_iters: 1000 #number of VB iterations
+    Bishop_model_selection: False # True or False depending on whether we want to apply
+    #Corduneanu_Bishop model selection
+    check_uncertainty: True # True or False depending on whether we want to check whether
+    # the uncertainty is estimated correctly
+    config_file: '/home/igor/Documents/R_pack_src/Epiclomal_edited/examples/inputs/config1.yaml'
+
+SOFTWARE:
+  hclust_software: '/home/igor/Documents/R_pack_src/Epiclomal_edited/scripts/hclust.R'
+  eval_software: '/home/igor/Documents/R_pack_src/Epiclomal_edited/scripts/eval_epiclomal.R'
+```
+
+After this time-consuming process, we get the result.
+
+For each filtering cobination (e.g. 0_0.95_10000) there are folders:
+
+```{bash}
+simple_hclust # the result after performing not-probabilistic clustering
+result_region # the folder contains heatmaps and another important information
+#for region-based type of Epiclomal clusterisation algorightm (considering CpG
+#of desired annotations - preferable result)
+result_basic # the same as above but for CpG-based type of algorithm
+#(all of CpGs across the genome)
+log 
+epi_region #this contains the clusterisation assignment for each cell and
+#CpG imputed state for each cluster (region-based version)  
+epi_basic #the same but for CpG-based version
+```
+
+The folder **result_region** has four types of different result based on the thresholds of DIC measure:
+
+```{bash}
+DIC_LINE_ELBOW_gainthr0.02_0.02
+DIC_LINE_ELBOW_gainthr0.05_0.02
+DIC_LINE_ELBOW_gainthr0.05_-100
+DIC_measure_gainthr0.05
+```
+
+Developer commentary:
+
+- DIC_measure_gainthr0.05 stops when the gain (DIC(t) - DIC(t-1)) is < 0.05. We used this in some earlier versions of the software, but now we use the next ones more.
+- DIC_LINE_ELBOW_gainthr0.05_0.02 and DIC_LINE_ELBOW_gainthr0.02_0.02 are very similar, they will stop at a number after which the curve doesn't improve a lot. We used these ones for most of the experiments.
+- DIC_LINE_ELBOW_gainthr0.05_-100 will often choose more clusters and is good if you expect more than 3 or so clusters. 
+
+Each folder has:
+
+1) Two R data files of mean methylation level of regions without imputing for each cell (region-based and CpG-based).
+2) Heatmaps for these matrices.
+3) Summary information about all of the iterations, including the best one.
+4) DIC selection curve
+5) V-measure of the number of clusters curve
+
+
+
+
